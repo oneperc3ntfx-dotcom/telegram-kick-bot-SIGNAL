@@ -1,7 +1,7 @@
 import os
 import requests
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from dotenv import load_dotenv
 
 from telegram.ext import (
@@ -21,7 +21,6 @@ kicked = set()
 
 
 def get_members():
-
     try:
 
         r = requests.get(
@@ -29,13 +28,28 @@ def get_members():
             timeout=30
         )
 
+        print(
+            f"Apps Script Status: {r.status_code}"
+        )
+
         data = r.json()
 
-        return data.get("data", [])
+        members = data.get(
+            "data",
+            []
+        )
+
+        print(
+            f"MEMBERS FOUND: {len(members)}"
+        )
+
+        return members
 
     except Exception as e:
 
-        print(e)
+        print(
+            f"GET MEMBERS ERROR: {e}"
+        )
 
         return []
 
@@ -52,7 +66,7 @@ async def send_warning(
 
 Yth. <a href="tg://user?id={user_id}">{username}</a>,
 
-Berdasarkan data administrasi terbaru, akun Anda dijadwalkan untuk dikeluarkan dari grup dalam waktu {minutes_left} menit sejak pemberitahuan ini dikirimkan.
+Berdasarkan data administrasi terbaru, akun Anda dijadwalkan untuk dikeluarkan dari grup dalam waktu <b>{minutes_left} menit</b> sejak pemberitahuan ini dikirimkan.
 
 Apabila Anda masih ingin mempertahankan akses ke grup atau terdapat kekeliruan pada data keanggotaan Anda, mohon segera melakukan konfirmasi sebelum batas waktu berakhir.
 
@@ -77,6 +91,10 @@ Terima kasih atas perhatian dan kerja samanya.
         disable_web_page_preview=True
     )
 
+    print(
+        f"WARNING {minutes_left} MIN SENT -> {username}"
+    )
+
 
 async def kick_member(
     bot,
@@ -91,121 +109,138 @@ async def kick_member(
             message_thread_id=TOPIC_ID,
             text=(
                 f"🔴 Masa aktif {username} telah berakhir.\n\n"
-                f"Sistem melakukan pengeluaran akun secara otomatis."
+                f"Sistem melakukan pengeluaran akun secara otomatis.\n\n"
+                f"Apabila ingin bergabung kembali, silakan hubungi @AITOOLSIGNAL_BOT"
             )
         )
 
         await bot.ban_chat_member(
-            GROUP_ID,
-            user_id
+            chat_id=GROUP_ID,
+            user_id=user_id
         )
 
         await bot.unban_chat_member(
-            GROUP_ID,
-            user_id
+            chat_id=GROUP_ID,
+            user_id=user_id
         )
 
         print(
-            f"KICKED {username}"
+            f"KICKED -> {username}"
         )
 
     except Exception as e:
 
         print(
-            f"ERROR KICK {username}: {e}"
+            f"KICK ERROR {username}: {e}"
         )
 
 
 async def checker(context):
 
-    members = get_members()
+    try:
 
-    now = datetime.utcnow()
+        members = get_members()
 
-    for member in members:
+        now = datetime.now(
+            UTC
+        )
 
-        try:
+        print(
+            f"CHECKING {len(members)} MEMBERS | {now}"
+        )
 
-            username = member["username"]
-            user_id = int(member["userId"])
+        for member in members:
 
-            kick_date = datetime.fromisoformat(
-                member["kickDate"].replace(
-                    "Z",
-                    "+00:00"
+            try:
+
+                username = member.get(
+                    "username",
+                    "Unknown"
                 )
-            )
 
-            kick_date = kick_date.replace(
-                tzinfo=None
-            )
+                user_id = int(
+                    member["userId"]
+                )
 
-            warn_10 = kick_date - timedelta(
-                minutes=10
-            )
-
-            warn_5 = kick_date - timedelta(
-                minutes=5
-            )
-
-            if (
-                now >= warn_10
-                and now < warn_5
-                and user_id not in warned_10
-            ):
-
-                warned_10.add(user_id)
-
-                await send_warning(
-                    context.bot,
-                    user_id,
-                    username,
-                    10
+                kick_date = datetime.fromisoformat(
+                    member["kickDate"].replace(
+                        "Z",
+                        "+00:00"
+                    )
                 )
 
                 print(
-                    f"10 MIN WARNING {username}"
+                    f"{username} | {user_id} | {kick_date}"
                 )
 
-            if (
-                now >= warn_5
-                and now < kick_date
-                and user_id not in warned_5
-            ):
-
-                warned_5.add(user_id)
-
-                await send_warning(
-                    context.bot,
-                    user_id,
-                    username,
-                    5
+                warn_10 = kick_date - timedelta(
+                    minutes=10
                 )
+
+                warn_5 = kick_date - timedelta(
+                    minutes=5
+                )
+
+                if (
+                    now >= warn_10
+                    and now < warn_5
+                    and user_id not in warned_10
+                ):
+
+                    warned_10.add(
+                        user_id
+                    )
+
+                    await send_warning(
+                        context.bot,
+                        user_id,
+                        username,
+                        10
+                    )
+
+                if (
+                    now >= warn_5
+                    and now < kick_date
+                    and user_id not in warned_5
+                ):
+
+                    warned_5.add(
+                        user_id
+                    )
+
+                    await send_warning(
+                        context.bot,
+                        user_id,
+                        username,
+                        5
+                    )
+
+                if (
+                    now >= kick_date
+                    and user_id not in kicked
+                ):
+
+                    kicked.add(
+                        user_id
+                    )
+
+                    await kick_member(
+                        context.bot,
+                        user_id,
+                        username
+                    )
+
+            except Exception as row_error:
 
                 print(
-                    f"5 MIN WARNING {username}"
+                    f"ROW ERROR: {row_error}"
                 )
 
-            if (
-                now >= kick_date
-                and user_id not in kicked
-            ):
+    except Exception as e:
 
-                kicked.add(
-                    user_id
-                )
-
-                await kick_member(
-                    context.bot,
-                    user_id,
-                    username
-                )
-
-        except Exception as e:
-
-            print(
-                f"ROW ERROR: {e}"
-            )
+        print(
+            f"CHECKER ERROR: {e}"
+        )
 
 
 def main():
@@ -219,7 +254,7 @@ def main():
     app.job_queue.run_repeating(
         checker,
         interval=60,
-        first=10
+        first=5
     )
 
     print(
